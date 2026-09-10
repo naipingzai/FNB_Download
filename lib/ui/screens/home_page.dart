@@ -8,10 +8,9 @@ import '../../services/download/xhs_bridge.dart';
 import '../../services/log_service.dart';
 import '../../services/storage/cookie_store.dart';
 
-/// 全新主页 — 搜索栏主导 + 快捷按钮 + 实时日志
+/// 首页 — 链接输入 + 平台切换 + 核心操作 + 实时日志
 class HomePage extends StatefulWidget {
-  final VoidCallback onOpenDrawer;
-  const HomePage({super.key, required this.onOpenDrawer});
+  const HomePage({super.key});
   @override
   State<HomePage> createState() => _HomePageState();
 }
@@ -21,7 +20,7 @@ class _HomePageState extends State<HomePage> {
   final _log = LogService.instance;
   bool _busy = false;
   String _platform = 'douyin';
-  bool _logVisible = false;
+  bool _logExpanded = false;
 
   @override
   void dispose() {
@@ -116,147 +115,6 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final tt = Theme.of(context).textTheme;
-    return CustomScrollView(slivers: [
-      // Top app bar with drawer button
-      SliverAppBar(
-        leading: IconButton(
-            icon: const Icon(Icons.menu), onPressed: widget.onOpenDrawer),
-        title: const Text('FNB Download'),
-        floating: true,
-        actions: [
-          IconButton(
-            icon: Badge(
-                isLabelVisible: _log.length > 0,
-                label:
-                    Text('${_log.length}', style: const TextStyle(fontSize: 9)),
-                child: const Icon(Icons.terminal)),
-            onPressed: () => setState(() => _logVisible = !_logVisible),
-          ),
-          const SizedBox(width: 4),
-        ],
-      ),
-      SliverToBoxAdapter(
-          child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          // 平台选择
-          SegmentedButton<String>(
-            segments: const [
-              ButtonSegment(
-                  value: 'douyin',
-                  icon: Icon(Icons.video_library, size: 18),
-                  label: Text('抖音')),
-              ButtonSegment(
-                  value: 'xhs',
-                  icon: Icon(Icons.book, size: 18),
-                  label: Text('小红书')),
-            ],
-            selected: {_platform},
-            onSelectionChanged: (s) => setState(() => _platform = s.first),
-          ),
-          const SizedBox(height: 16),
-          // 搜索栏
-          SearchBar(
-            controller: _urlCtrl,
-            hintText: '粘贴${_platform == 'douyin' ? '抖音' : '小红书'}链接或搜索关键词',
-            leading: const Padding(
-                padding: EdgeInsets.only(left: 8), child: Icon(Icons.link)),
-            trailing: [
-              if (_urlCtrl.text.isNotEmpty)
-                IconButton(
-                    icon: const Icon(Icons.clear),
-                    onPressed: () => setState(() => _urlCtrl.clear)),
-              IconButton(
-                  icon: const Icon(Icons.paste),
-                  onPressed: () async {
-                    final d = await Clipboard.getData(Clipboard.kTextPlain);
-                    if (d?.text != null && d!.text!.isNotEmpty)
-                      setState(() => _urlCtrl.text = d.text!);
-                  }),
-            ],
-            onChanged: (_) => setState(() {}),
-            onSubmitted: (_) => _onDownload(),
-          ),
-          const SizedBox(height: 12),
-          // 主操作按钮
-          Row(children: [
-            Expanded(
-                child: FilledButton.icon(
-              onPressed: _busy ? null : _onDownload,
-              icon: _busy
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Icon(Icons.download),
-              label: Text(_busy ? '处理中...' : '下载'),
-            )),
-            const SizedBox(width: 12),
-            Expanded(
-                child: OutlinedButton.icon(
-              onPressed: _busy ? null : _onParse,
-              icon: const Icon(Icons.info_outline),
-              label: const Text('解析'),
-            )),
-          ]),
-          const SizedBox(height: 24),
-          // 快捷功能区
-          Text('更多功能',
-              style: tt.titleSmall?.copyWith(color: cs.onSurfaceVariant)),
-          const SizedBox(height: 8),
-        ]),
-      )),
-      // 功能网格
-      SliverPadding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        sliver: SliverGrid.count(
-          crossAxisCount: MediaQuery.of(context).size.width > 600 ? 4 : 2,
-          mainAxisSpacing: 10,
-          crossAxisSpacing: 10,
-          childAspectRatio: 1.8,
-          children: [
-            if (_platform == 'douyin')
-              _gridBtn(context, Icons.local_fire_department, '热榜', cs.error,
-                  cs.errorContainer, _busy ? null : _onHotList),
-            _gridBtn(
-                context,
-                Icons.comment,
-                '评论',
-                cs.tertiary,
-                cs.tertiaryContainer,
-                _busy ? null : () => _simpleCall('scrape_comments', '评论')),
-            _gridBtn(
-                context,
-                Icons.music_note,
-                '音频',
-                cs.secondary,
-                cs.secondaryContainer,
-                _busy ? null : () => _simpleCall('extract_audio', '音频')),
-            _gridBtn(
-                context,
-                Icons.image,
-                '封面',
-                cs.primary,
-                cs.primaryContainer,
-                _busy ? null : () => _simpleCall('download_cover', '封面')),
-          ],
-        ),
-      ),
-      // 日志
-      if (_logVisible)
-        SliverToBoxAdapter(
-            child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: _buildLogPanel(context),
-        )),
-      const SliverToBoxAdapter(child: SizedBox(height: 32)),
-    ]);
-  }
-
   void _simpleCall(String fn, String label) {
     final url = _firstUrl;
     if (url.isEmpty) {
@@ -274,67 +132,572 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
-  Widget _gridBtn(BuildContext ctx, IconData icon, String label, Color fg,
-      Color bg, VoidCallback? onTap) {
-    return Card(
-      color: bg.withValues(alpha: 0.3),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-          onTap: onTap,
-          child: Center(
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              Icon(icon, color: fg, size: 28),
-              const SizedBox(height: 6),
-              Text(label,
-                  style:
-                      Theme.of(ctx).textTheme.labelLarge?.copyWith(color: fg))
-            ]),
-          )),
+  // ──────────────────── UI ────────────────────
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return CustomScrollView(
+      slivers: [
+        // ── AppBar ──
+        SliverAppBar.large(
+          title: const Text('FNB Download'),
+          actions: [
+            Badge(
+              isLabelVisible: _log.entries.isNotEmpty,
+              label: Text('${_log.entries.length}',
+                  style: const TextStyle(fontSize: 9)),
+              child: IconButton(
+                icon: Icon(
+                  _logExpanded ? Icons.terminal : Icons.terminal_outlined,
+                  size: 22,
+                ),
+                onPressed: () => setState(() => _logExpanded = !_logExpanded),
+                tooltip: '日志',
+              ),
+            ),
+            const SizedBox(width: 4),
+          ],
+        ),
+
+        // ── 主体内容 ──
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+          sliver: SliverList.list(
+            children: [
+              // 平台选择器
+              _PlatformSelector(
+                platform: _platform,
+                onChanged: (p) => setState(() => _platform = p),
+              ),
+              const SizedBox(height: 20),
+
+              // URL 输入区
+              _UrlInputCard(
+                controller: _urlCtrl,
+                platform: _platform,
+                busy: _busy,
+                onChanged: () => setState(() {}),
+                onPaste: () async {
+                  final d = await Clipboard.getData(Clipboard.kTextPlain);
+                  if (d?.text != null && d!.text!.isNotEmpty) {
+                    setState(() => _urlCtrl.text = d.text!);
+                  }
+                },
+                onClear: () => setState(() => _urlCtrl.clear()),
+                onSubmitted: _onDownload,
+              ),
+              const SizedBox(height: 20),
+
+              // 操作按钮
+              _ActionButtons(
+                busy: _busy,
+                onDownload: _onDownload,
+                onParse: _onParse,
+              ),
+              const SizedBox(height: 28),
+
+              // 更多功能标题
+              Row(
+                children: [
+                  Text(
+                    '更多功能',
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Divider(color: cs.outlineVariant),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+            ],
+          ),
+        ),
+
+        // ── 功能网格 ──
+        SliverPadding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          sliver: SliverGrid.count(
+            crossAxisCount: 3,
+            mainAxisSpacing: 12,
+            crossAxisSpacing: 12,
+            childAspectRatio: 1.0,
+            children: [
+              _FeatureTile(
+                icon: Icons.local_fire_department_rounded,
+                label: '热榜',
+                gradient: [cs.error, cs.errorContainer],
+                onTap: _busy ? null : _onHotList,
+              ),
+              _FeatureTile(
+                icon: Icons.bookmark_rounded,
+                label: '收藏夹',
+                gradient: [cs.primary, cs.primaryContainer],
+                onTap: _busy
+                    ? null
+                    : () => _simpleCall('list_collect_folders', '收藏夹'),
+              ),
+              _FeatureTile(
+                icon: Icons.search_rounded,
+                label: '搜索',
+                gradient: [cs.secondary, cs.secondaryContainer],
+                onTap: _busy
+                    ? null
+                    : () => _do('搜索', () async {
+                          await _syncCookie();
+                          return DouyinBridge.searchGeneral(_firstUrl);
+                        }),
+              ),
+              _FeatureTile(
+                icon: Icons.download_done_rounded,
+                label: '批量下载',
+                gradient: [cs.tertiary, cs.tertiaryContainer],
+                onTap:
+                    _busy ? null : () => _simpleCall('batch_download_account', '批量'),
+              ),
+              _FeatureTile(
+                icon: Icons.bar_chart_rounded,
+                label: '数据统计',
+                gradient: [cs.primary, cs.primaryContainer],
+                onTap:
+                    _busy ? null : () => _simpleCall('get_data_stats', '统计'),
+              ),
+              _FeatureTile(
+                icon: Icons.photo_library_rounded,
+                label: '封面下载',
+                gradient: [cs.secondary, cs.secondaryContainer],
+                onTap:
+                    _busy ? null : () => _simpleCall('download_cover', '封面'),
+              ),
+            ],
+          ),
+        ),
+
+        // ── 日志面板 ──
+        if (_logExpanded)
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(20, 24, 20, 8),
+            sliver: SliverToBoxAdapter(child: _LogPanel(log: _log)),
+          ),
+
+        const SliverToBoxAdapter(child: SizedBox(height: 24)),
+      ],
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  子组件
+// ═══════════════════════════════════════════════════════════════
+
+/// 平台选择器 — 圆角卡片 + 带图标的选项
+class _PlatformSelector extends StatelessWidget {
+  final String platform;
+  final ValueChanged<String> onChanged;
+
+  const _PlatformSelector({
+    required this.platform,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      padding: const EdgeInsets.all(4),
+      child: Row(
+        children: [
+          _platformOption(
+            context,
+            icon: Icons.play_circle_fill_rounded,
+            label: '抖音',
+            value: 'douyin',
+            color: cs.primary,
+            selected: platform == 'douyin',
+            onTap: () => onChanged('douyin'),
+          ),
+          _platformOption(
+            context,
+            icon: Icons.auto_stories_rounded,
+            label: '小红书',
+            value: 'xhs',
+            color: cs.error,
+            selected: platform == 'xhs',
+            onTap: () => onChanged('xhs'),
+          ),
+        ],
+      ),
     );
   }
 
-  Widget _buildLogPanel(BuildContext context) {
+  Widget _platformOption(
+    BuildContext context, {
+    required IconData icon,
+    required String label,
+    required String value,
+    required Color color,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
     final cs = Theme.of(context).colorScheme;
-    final entries = _log.entries.reversed.take(15).toList();
-    return ValueListenableBuilder<int>(
-      valueListenable: _log.notifier,
-      builder: (_, __, ___) => Card(
-        color: cs.surfaceContainerHighest.withValues(alpha: 0.4),
-        child:
-            Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Padding(
-              padding: const EdgeInsets.fromLTRB(16, 10, 8, 6),
-              child: Row(children: [
-                Icon(Icons.terminal, size: 16, color: cs.primary),
-                const SizedBox(width: 8),
-                const Text('日志',
-                    style:
-                        TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                const Spacer(),
-                IconButton(
-                    icon: const Icon(Icons.close, size: 16),
-                    visualDensity: VisualDensity.compact,
-                    onPressed: () => setState(() => _logVisible = false)),
-              ])),
-          if (entries.isEmpty)
-            const Padding(
-                padding: EdgeInsets.all(16),
-                child:
-                    Center(child: Text('无日志', style: TextStyle(fontSize: 12))))
-          else
-            ...entries.map((e) => Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
-                  child: Text(
-                      '${e.timestamp.hour.toString().padLeft(2, '0')}:${e.timestamp.minute.toString().padLeft(2, '0')}:${e.timestamp.second.toString().padLeft(2, '0')}  ${e.message}',
-                      style: TextStyle(
-                          fontSize: 11,
-                          color: cs.onSurfaceVariant,
-                          fontFamily: 'monospace')),
-                )),
-          const SizedBox(height: 8),
-        ]),
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeInOut,
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          decoration: BoxDecoration(
+            color: selected ? color.withValues(alpha: 0.12) : Colors.transparent,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                icon,
+                size: 20,
+                color: selected ? color : cs.onSurfaceVariant,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                label,
+                style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                      color: selected ? color : cs.onSurfaceVariant,
+                      fontWeight:
+                          selected ? FontWeight.w600 : FontWeight.normal,
+                    ),
+              ),
+            ],
+          ),
+        ),
       ),
+    );
+  }
+}
+
+/// URL 输入卡片
+class _UrlInputCard extends StatelessWidget {
+  final TextEditingController controller;
+  final String platform;
+  final bool busy;
+  final VoidCallback onChanged;
+  final VoidCallback onPaste;
+  final VoidCallback onClear;
+  final VoidCallback onSubmitted;
+
+  const _UrlInputCard({
+    required this.controller,
+    required this.platform,
+    required this.busy,
+    required this.onChanged,
+    required this.onPaste,
+    required this.onClear,
+    required this.onSubmitted,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: cs.outlineVariant.withValues(alpha: 0.5),
+          width: 1,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+            child: Row(
+              children: [
+                Icon(Icons.link_rounded, size: 18, color: cs.primary),
+                const SizedBox(width: 8),
+                Text(
+                  '粘贴链接',
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                        color: cs.onSurfaceVariant,
+                        fontWeight: FontWeight.w500,
+                      ),
+                ),
+              ],
+            ),
+          ),
+          TextField(
+            controller: controller,
+            enabled: !busy,
+            onChanged: (_) => onChanged(),
+            onSubmitted: (_) => onSubmitted(),
+            maxLines: 2,
+            minLines: 1,
+            decoration: InputDecoration(
+              hintText:
+                  '粘贴${platform == 'douyin' ? '抖音' : '小红书'}作品链接...',
+              hintStyle: TextStyle(color: cs.outline),
+              border: InputBorder.none,
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              suffixIcon: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (controller.text.isNotEmpty)
+                    IconButton(
+                      icon: Icon(Icons.close_rounded,
+                          size: 18, color: cs.outline),
+                      onPressed: onClear,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  IconButton(
+                    icon: Icon(Icons.content_paste_rounded,
+                        size: 18, color: cs.primary),
+                    onPressed: onPaste,
+                    tooltip: '粘贴',
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 主操作按钮（下载 + 解析）
+class _ActionButtons extends StatelessWidget {
+  final bool busy;
+  final VoidCallback onDownload;
+  final VoidCallback onParse;
+
+  const _ActionButtons({
+    required this.busy,
+    required this.onDownload,
+    required this.onParse,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: FilledButton.icon(
+            onPressed: busy ? null : onDownload,
+            style: FilledButton.styleFrom(
+              minimumSize: const Size(0, 52),
+              textStyle: const TextStyle(
+                  fontSize: 15, fontWeight: FontWeight.w600),
+            ),
+            icon: busy
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : const Icon(Icons.download_rounded, size: 20),
+            label: Text(busy ? '处理中...' : '开始下载'),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: OutlinedButton.icon(
+            onPressed: busy ? null : onParse,
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size(0, 52),
+              textStyle: const TextStyle(
+                  fontSize: 15, fontWeight: FontWeight.w500),
+            ),
+            icon: const Icon(Icons.info_outline_rounded, size: 20),
+            label: const Text('解析链接'),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// 功能网格卡片 — 微渐变图标背景
+class _FeatureTile extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final List<Color> gradient;
+  final VoidCallback? onTap;
+
+  const _FeatureTile({
+    required this.icon,
+    required this.label,
+    required this.gradient,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final enabled = onTap != null;
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      color: cs.surfaceContainerLow,
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      enabled
+                          ? gradient[0].withValues(alpha: 0.15)
+                          : cs.surfaceContainerHighest,
+                      enabled
+                          ? gradient[1].withValues(alpha: 0.25)
+                          : cs.surfaceContainerHighest,
+                    ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  icon,
+                  size: 22,
+                  color: enabled ? gradient[0] : cs.outline,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                label,
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                      color: enabled ? cs.onSurface : cs.outline,
+                      fontWeight: FontWeight.w500,
+                    ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 日志面板
+class _LogPanel extends StatelessWidget {
+  final LogService log;
+  const _LogPanel({required this.log});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return ValueListenableBuilder<int>(
+      valueListenable: log.notifier,
+      builder: (_, __, ___) {
+        final entries = log.entries.reversed.take(20).toList();
+        return Card(
+          elevation: 0,
+          color: cs.surfaceContainerLow,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Header
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 8, 4),
+                child: Row(
+                  children: [
+                    Icon(Icons.terminal_rounded, size: 18, color: cs.primary),
+                    const SizedBox(width: 8),
+                    Text(
+                      '操作日志',
+                      style:
+                          Theme.of(context).textTheme.titleSmall?.copyWith(
+                                fontWeight: FontWeight.w600,
+                              ),
+                    ),
+                    const Spacer(),
+                    IconButton(
+                      icon: Icon(Icons.delete_sweep_rounded,
+                          size: 18, color: cs.outline),
+                      onPressed: log.clear,
+                      visualDensity: VisualDensity.compact,
+                      tooltip: '清除',
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              if (entries.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 32),
+                  child: Center(
+                    child: Text('暂无操作记录',
+                        style: TextStyle(color: Colors.grey)),
+                  ),
+                )
+              else
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 220),
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    itemCount: entries.length,
+                    itemBuilder: (ctx, i) {
+                      final e = entries[i];
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 2),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '${e.timestamp.hour.toString().padLeft(2, '0')}:${e.timestamp.minute.toString().padLeft(2, '0')}:${e.timestamp.second.toString().padLeft(2, '0')}',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .labelSmall
+                                  ?.copyWith(
+                                    color: cs.outline,
+                                    fontFamily: 'monospace',
+                                  ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                e.message,
+                                style: Theme.of(context).textTheme.bodySmall,
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

@@ -41,11 +41,10 @@ class _TasksScreenState extends State<TasksScreen> {
     final items = _tasks.entries.toList()
       ..sort((a, b) => (b.value['ts'] ?? 0).compareTo(a.value['ts'] ?? 0));
 
-    return Scaffold(
-      body: CustomScrollView(
+    return CustomScrollView(
         slivers: [
           SliverAppBar.large(
-            title: const Text('任务'),
+            title: const Text('下载任务'),
             actions: [
               if (items.isNotEmpty)
                 IconButton(
@@ -81,8 +80,7 @@ class _TasksScreenState extends State<TasksScreen> {
             ),
           const SliverToBoxAdapter(child: SizedBox(height: 16)),
         ],
-      ),
-    );
+      );
   }
 }
 
@@ -93,32 +91,37 @@ class _EmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 96,
-            height: 96,
-            decoration: BoxDecoration(
-              color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
-              shape: BoxShape.circle,
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 80,
+              height: 80,
+              decoration: BoxDecoration(
+                color: scheme.primaryContainer.withValues(alpha: 0.4),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(Icons.download_rounded,
+                  size: 40, color: scheme.primary),
             ),
-            child: Icon(Icons.cloud_download_outlined,
-                size: 48, color: scheme.outline),
-          ),
-          const SizedBox(height: 20),
-          Text('暂无任务',
-              style: Theme.of(context)
-                  .textTheme
-                  .titleLarge
-                  ?.copyWith(color: scheme.onSurfaceVariant)),
-          const SizedBox(height: 8),
-          Text('下载中的任务将实时显示在这里',
-              style: Theme.of(context)
-                  .textTheme
-                  .bodyMedium
-                  ?.copyWith(color: scheme.outline)),
-        ],
+            const SizedBox(height: 20),
+            Text('暂无任务',
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      color: scheme.onSurface,
+                      fontWeight: FontWeight.w500,
+                    )),
+            const SizedBox(height: 8),
+            Text(
+              '开始下载后，任务进度将显示在这里',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: scheme.outline,
+                  ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
       ),
     );
   }

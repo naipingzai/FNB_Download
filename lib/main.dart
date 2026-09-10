@@ -50,11 +50,11 @@ class _FnbAppState extends State<FnbApp> {
   @override
   Widget build(BuildContext context) {
     final lightScheme = ColorScheme.fromSeed(
-      seedColor: const Color(0xFF6750A4),
+      seedColor: const Color(0xFF006874),
       brightness: Brightness.light,
     );
     final darkScheme = ColorScheme.fromSeed(
-      seedColor: const Color(0xFF6750A4),
+      seedColor: const Color(0xFF006874),
       brightness: Brightness.dark,
     );
     return ValueListenableBuilder<ThemeMode>(
@@ -92,7 +92,7 @@ class _FnbAppState extends State<FnbApp> {
       ),
       cardTheme: CardThemeData(
         elevation: 0,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         color: scheme.surfaceContainerLow,
         clipBehavior: Clip.antiAlias,
       ),
@@ -117,15 +117,15 @@ class _FnbAppState extends State<FnbApp> {
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
           shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
           shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
         ),
       ),
       snackBarTheme: SnackBarThemeData(
@@ -133,7 +133,7 @@ class _FnbAppState extends State<FnbApp> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       ),
       navigationBarTheme: NavigationBarThemeData(
-        height: 80,
+        height: 72,
         labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
         indicatorColor: scheme.primaryContainer,
       ),
