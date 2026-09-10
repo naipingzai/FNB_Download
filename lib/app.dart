@@ -1,85 +1,68 @@
 import 'package:flutter/material.dart';
+import 'ui/screens/home_page.dart';
+import 'ui/screens/settings_page.dart';
 
-import 'design_system/theme/app_theme.dart';
-import 'ui/screens/home_screen.dart';
-import 'ui/screens/platform_shell.dart';
+/// 全新 M3 应用壳 — Drawer 导航 + 搜索优先
+class FnbApp extends StatefulWidget {
+  final ValueNotifier<ThemeMode> themeMode;
+  const FnbApp({super.key, required this.themeMode});
+  @override
+  State<FnbApp> createState() => _FnbAppState();
+}
 
-/// 应用根 Widget — 仅负责 MaterialApp 与路由
-class DownloadManagerApp extends StatelessWidget {
-  const DownloadManagerApp({super.key});
+class _FnbAppState extends State<FnbApp> {
+  int _pageIndex = 0;
+  final _drawerKey = GlobalKey<ScaffoldState>();
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: '下载',
-      debugShowCheckedModeBanner: false,
-      theme: AppTheme.lightTheme(null),
-      darkTheme: AppTheme.darkTheme(null),
-      themeMode: ThemeMode.system,
-      home: const _RootNavigator(),
+    final cs = Theme.of(context).colorScheme;
+    return Scaffold(
+      key: _drawerKey,
+      drawer: NavigationDrawer(
+        selectedIndex: _pageIndex,
+        onDestinationSelected: (i) {
+          setState(() => _pageIndex = i);
+          Navigator.pop(context);
+        },
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(28, 28, 16, 20),
+            child: Row(children: [
+              Icon(Icons.get_app, size: 28, color: cs.primary),
+              const SizedBox(width: 12),
+              Text('FNB Download',
+                  style: Theme.of(context).textTheme.titleMedium),
+            ]),
+          ),
+          const NavigationDrawerDestination(
+              icon: Icon(Icons.link), label: Text('下载任务')),
+          const NavigationDrawerDestination(
+              icon: Icon(Icons.history), label: Text('历史记录')),
+          const Padding(
+              padding: EdgeInsets.fromLTRB(28, 16, 28, 10), child: Divider()),
+          const NavigationDrawerDestination(
+              icon: Icon(Icons.tune), label: Text('偏好设置')),
+        ],
+      ),
+      body: IndexedStack(
+        index: _pageIndex,
+        children: [
+          HomePage(onOpenDrawer: () => _drawerKey.currentState?.openDrawer()),
+          _HistoryPlaceholder(),
+          SettingsPage(themeMode: widget.themeMode),
+        ],
+      ),
     );
   }
 }
 
-/// 根导航：home ↔ 平台容器
-class _RootNavigator extends StatefulWidget {
-  const _RootNavigator();
-
-  @override
-  State<_RootNavigator> createState() => _RootNavigatorState();
-}
-
-class _RootNavigatorState extends State<_RootNavigator> {
-  PlatformMode _platformMode = PlatformMode.home;
-  String? _sharedLink;
-
-  void _enterPlatform(PlatformMode mode, String? sharedLink) {
-    setState(() {
-      _platformMode = mode;
-      _sharedLink = sharedLink;
-    });
-  }
-
-  void _exitPlatform() {
-    setState(() {
-      _platformMode = PlatformMode.home;
-      _sharedLink = null;
-    });
-  }
-
+class _HistoryPlaceholder extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    switch (_platformMode) {
-      case PlatformMode.home:
-        return HomeScreen(
-          onSelectDouyin: () => _enterPlatform(PlatformMode.douyin, null),
-          onSelectXhs: () => _enterPlatform(PlatformMode.xhs, null),
-          onSelectKuaishou: () => _enterPlatform(PlatformMode.kuaishou, null),
-        );
-      case PlatformMode.douyin:
-        return PlatformShell(
-          platformName: '抖音',
-          platformId: 'douyin',
-          sharedLink: _sharedLink,
-          onBackToHome: _exitPlatform,
-        );
-      case PlatformMode.xhs:
-        return PlatformShell(
-          platformName: '小红书',
-          platformId: 'xhs',
-          sharedLink: _sharedLink,
-          onBackToHome: _exitPlatform,
-        );
-      case PlatformMode.kuaishou:
-        return PlatformShell(
-          platformName: '快手',
-          platformId: 'kuaishou',
-          sharedLink: _sharedLink,
-          onBackToHome: _exitPlatform,
-        );
-    }
+    return CustomScrollView(slivers: [
+      SliverAppBar.large(title: const Text('历史记录')),
+      const SliverFillRemaining(child: Center(child: Text('下载记录将显示在这里'))),
+    ]);
   }
 }
-
-/// 平台模式
-enum PlatformMode { home, douyin, xhs, kuaishou }

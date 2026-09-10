@@ -1,10 +1,10 @@
 name: flutter_download_manager
-description: "抖音/小红书/快手媒体下载器 - Flutter 跨平台版本 (Android / iOS / Desktop)"
+description: "抖音/小红书/快手媒体下载器 - Flutter 跨平台版本 (Linux / Android)"
 publish_to: 'none'
 version: 1.0.0+1
 
 environment:
-  sdk: '>=3.0.0 <4.0.0'
+  sdk: '>=3.5.0 <4.0.0'
 
 dependencies:
   flutter:
@@ -16,6 +16,7 @@ dependencies:
   gal: ^2.3.0
   path_provider: ^2.1.0
   url_launcher: ^6.3.2
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -24,4 +25,31 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
-    - assets/
+    # 核心 Python 脚本
+    - assets/python/fnb_bridge.py
+    - assets/python/fnb_native.py
+    - assets/python/fnb_subprocess.py
+    - assets/python/compat_setup.py
+    - assets/python/__init__.py
+    # tiktdownloader 子包
+    - assets/python/tkd/
+    - assets/python/tkd/config/
+    - assets/python/tkd/custom/
+    - assets/python/tkd/downloader/
+    - assets/python/tkd/encrypt/
+    - assets/python/tkd/extract/
+    - assets/python/tkd/interface/
+    - assets/python/tkd/link/
+    - assets/python/tkd/manager/
+    - assets/python/tkd/models/
+    - assets/python/tkd/module/
+    - assets/python/tkd/record/
+    - assets/python/tkd/storage/
+    - assets/python/tkd/tools/
+    - assets/python/tkd/translation/
+    # XHS-Downloader 子包
+    - assets/python/xhs/
+    - assets/python/xhs/application/
+    - assets/python/xhs/expansion/
+    - assets/python/xhs/module/
+    - assets/python/xhs/translation/

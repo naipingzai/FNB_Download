@@ -2,811 +2,580 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
+import '../../services/download/download_engine.dart';
 import '../../services/download/douyin_bridge.dart';
 import '../../services/download/xhs_bridge.dart';
-import '../../services/download/kuaishou_bridge.dart';
+import '../../services/log_service.dart';
 import '../../services/storage/cookie_store.dart';
-import '../../services/platform/gallery_service.dart';
 
-/// 下载页面 — 粘贴链接 + 所有平台功能入口
 class DownloadScreen extends StatefulWidget {
-  final String platformId;
-  final String platformName;
-  final String? sharedLink;
-
-  const DownloadScreen({
-    super.key,
-    required this.platformId,
-    required this.platformName,
-    this.sharedLink,
-  });
-
+  const DownloadScreen({super.key});
   @override
   State<DownloadScreen> createState() => _DownloadScreenState();
 }
 
 class _DownloadScreenState extends State<DownloadScreen> {
-  final TextEditingController _linkController = TextEditingController();
-  bool _isProcessing = false;
-
-  @override
-  void initState() {
-    super.initState();
-    if (widget.sharedLink != null) {
-      _linkController.text = widget.sharedLink!;
-    }
-    _syncCookie();
-  }
+  final _link = TextEditingController();
+  bool _busy = false;
+  String _platform = 'douyin';
+  bool _showLog = false;
+  final _log = LogService.instance;
 
   @override
   void dispose() {
-    _linkController.dispose();
+    _link.dispose();
     super.dispose();
   }
 
-  String _extractLink() {
-    final raw = _linkController.text.trim();
-    final match = RegExp(r'https?://[^\s<>"]+').firstMatch(raw);
-    return match?.group(0) ?? raw;
-  }
-
-  List<String> _extractAllLinks() {
-    final raw = _linkController.text.trim();
-    final matches = RegExp(r'https?://[^\s<>"]+').allMatches(raw);
-    return matches.map((m) => m.group(0)!).toList();
+  String get _firstLink {
+    final m = RegExp(r'https?://\S+').firstMatch(_link.text.trim());
+    return m?.group(0) ?? _link.text.trim();
   }
 
   Future<void> _syncCookie() async {
-    final store = CookieStore(platform: widget.platformId);
+    final store = CookieStore(platform: _platform);
     await store.load();
     final cookie = store.getActiveCookie();
     if (cookie == null || cookie.isEmpty) return;
-    switch (widget.platformId) {
-      case 'xhs':
-        await XhsBridge.setCookie(cookie);
-        break;
-      case 'kuaishou':
-        await KuaishouBridge.setCookie(cookie);
-        break;
-      default:
-        await DouyinBridge.setCookie(cookie);
+    if (_platform == 'xhs') {
+      await XhsBridge.setCookie(cookie);
+    } else {
+      await DouyinBridge.setCookie(cookie);
     }
   }
 
-  Future<void> _pasteFromClipboard() async {
-    final data = await Clipboard.getData(Clipboard.kTextPlain);
-    if (data?.text != null && data!.text!.isNotEmpty) {
-      setState(() => _linkController.text = data.text!);
-    }
+  Future<String> _savePath() async {
+    final dir = await getApplicationDocumentsDirectory();
+    final p = _platform == 'xhs' ? 'XhsDownload' : 'DyDownload';
+    final path = '${dir.path}/$p';
+    await Directory(path).create(recursive: true);
+    return path;
   }
 
-  void _showSnackBar(String message, {bool isError = false}) {
+  void _snack(String msg, {bool error = false}) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: isError ? Theme.of(context).colorScheme.error : null,
-        duration: const Duration(seconds: 3),
-      ),
-    );
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg),
+      behavior: SnackBarBehavior.floating,
+      backgroundColor: error ? Theme.of(context).colorScheme.error : null,
+    ));
   }
 
-  void _setProcessing(bool value) {
-    if (mounted) setState(() => _isProcessing = value);
-  }
-
-  String _getDownloadDir() {
-    switch (widget.platformId) {
-      case 'xhs':
-        return 'XhsDownload';
-      case 'kuaishou':
-        return 'KsDownload';
-      default:
-        return 'DyDownload';
-    }
-  }
-
-  Future<String> _getSavePath() async {
-    final appDir = await getApplicationDocumentsDirectory();
-    final savePath = '${appDir.path}/${_getDownloadDir()}';
-    await Directory(savePath).create(recursive: true);
-    return savePath;
-  }
-
-  // ═══ 核心下载功能 ═══
-
-  /// 下载单个链接
-  Future<void> _download() async {
-    final url = _extractLink();
-    if (url.isEmpty) {
-      _showSnackBar('请先输入链接', isError: true);
-      return;
-    }
-    await _syncCookie();
-    _setProcessing(true);
-    _showSnackBar('正在解析链接...');
-
+  Future<void> _run(String label, Future<void> Function() task) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    _log.info('$label...', tag: _platform);
     try {
-      final savePath = await _getSavePath();
-      Map<String, dynamic> result;
-      switch (widget.platformId) {
-        case 'xhs':
-          result = await XhsBridge.parseAndDownload(url, savePath);
-          break;
-        case 'kuaishou':
-          result = await KuaishouBridge.parseAndDownload(url, savePath);
-          break;
-        default:
-          result = await DouyinBridge.parseAndDownload(url, savePath);
-      }
-
-      if (!mounted) return;
-      if (result['success'] == true) {
-        _saveToGallery(result, savePath);
-        _showSnackBar('下载成功: ${result['title'] ?? ''}');
-      } else {
-        final msg = result['message']?.toString() ?? '未知错误';
-        if (msg != '已下载过' && msg != '该链接正在下载中') {
-          _showSnackBar('下载失败: $msg', isError: true);
-        }
-      }
+      await task();
     } catch (e) {
-      _showSnackBar('下载失败: $e', isError: true);
+      _log.error('$label 失败: $e', tag: _platform);
+      _snack('执行失败: $e', error: true);
     } finally {
-      _setProcessing(false);
+      if (mounted) setState(() => _busy = false);
     }
   }
 
-  /// 批量下载多个链接
-  Future<void> _batchDownload() async {
-    final links = _extractAllLinks();
-    if (links.isEmpty) {
-      _showSnackBar('请先输入链接', isError: true);
-      return;
-    }
-    if (links.length == 1) {
-      await _download();
-      return;
-    }
+  void _download() {
+    final url = _firstLink;
+    if (url.isEmpty) return _snack('请先输入链接', error: true);
+    _run('下载', () async {
+      await _syncCookie();
+      final sp = await _savePath();
+      final taskId = DownloadEngine.instance.newTaskId();
+      final r = await DownloadEngine.instance.callInBackground(
+          'parse_and_download', {
+        'platform': _platform,
+        'link': url,
+        'save_path': sp,
+        'task_id': taskId
+      });
+      final ok = r['success'] == true;
+      _log.info(ok ? '${r['message'] ?? '下载完成'}' : '失败: ${r['message']}',
+          tag: _platform);
+      _snack(ok ? '${r['message'] ?? '下载完成'}' : '失败: ${r['message']}',
+          error: !ok);
+    });
+  }
 
-    await _syncCookie();
-    _setProcessing(true);
-    _showSnackBar('检测到 ${links.length} 个链接，开始批量下载...');
-
-    int success = 0, fail = 0;
-    for (var i = 0; i < links.length; i++) {
+  void _detect() {
+    final url = _firstLink;
+    if (url.isEmpty) return _snack('请先输入链接', error: true);
+    _run('解析', () async {
+      await _syncCookie();
+      final r = await DownloadEngine.instance
+          .call('detect_link_info', {'platform': _platform, 'link': url});
       if (!mounted) return;
-      _showSnackBar('正在下载第 ${i + 1}/${links.length} 个...');
-      try {
-        final savePath = await _getSavePath();
-        Map<String, dynamic> result;
-        switch (widget.platformId) {
-          case 'xhs':
-            result = await XhsBridge.parseAndDownload(links[i], savePath);
-            break;
-          case 'kuaishou':
-            result = await KuaishouBridge.parseAndDownload(links[i], savePath);
-            break;
-          default:
-            result = await DouyinBridge.parseAndDownload(links[i], savePath);
-        }
-        if (result['success'] == true) {
-          success++;
-          _saveToGallery(result, savePath);
-        } else {
-          fail++;
-        }
-      } catch (e) {
-        fail++;
+      if (r['success'] != true) {
+        _snack('解析失败: ${r['message']}', error: true);
+        return;
       }
-    }
-    _showSnackBar('批量下载完成: 成功 $success, 失败 $fail');
-    _setProcessing(false);
+      _log.success('解析成功: ${r['title'] ?? ''}', tag: _platform);
+      _showLinkInfo(r);
+    });
   }
 
-  /// 保存到相册
-  Future<void> _saveToGallery(
-      Map<String, dynamic> result, String savePath) async {
-    try {
-      final path = result['path']?.toString() ?? '';
-      final albumName = '${widget.platformName}下载';
-      await GalleryService.instance.requestPermission();
-      if (path.isNotEmpty) {
-        await GalleryService.instance.saveToGallery(path, album: albumName);
-      } else {
-        final dir = Directory(savePath);
-        if (await dir.exists()) {
-          final files = <String>[];
-          await for (final entity in dir.list(recursive: true)) {
-            if (entity is File) files.add(entity.path);
-          }
-          await GalleryService.instance
-              .saveAllToGallery(files, album: albumName);
-        }
-      }
-    } catch (e) {
-      debugPrint('Gallery save failed: $e');
-    }
+  void _showLinkInfo(Map<String, dynamic> r) {
+    final scheme = Theme.of(context).colorScheme;
+    final author = r['author'] as Map<String, dynamic>?;
+    showModalBottomSheet(
+        context: context,
+        isScrollControlled: true,
+        builder: (ctx) {
+          return DraggableScrollableSheet(
+              expand: false,
+              initialChildSize: 0.5,
+              builder: (ctx, scroll) {
+                return ListView(
+                    controller: scroll,
+                    padding: const EdgeInsets.all(24),
+                    children: [
+                      Text('链接信息',
+                          style: Theme.of(ctx).textTheme.headlineSmall),
+                      const SizedBox(height: 16),
+                      if (r['title'] != null)
+                        Card(
+                          child: Padding(
+                              padding: const EdgeInsets.all(16),
+                              child: Text('${r['title']}',
+                                  style: Theme.of(ctx).textTheme.bodyLarge)),
+                        ),
+                      if (author != null) ...[
+                        const SizedBox(height: 8),
+                        Card(
+                            child: ListTile(
+                          leading: CircleAvatar(
+                              backgroundColor: scheme.primaryContainer,
+                              child: Icon(Icons.person,
+                                  color: scheme.onPrimaryContainer)),
+                          title: Text(author['nickname'] ?? ''),
+                          subtitle: const Text('作者'),
+                          trailing: FilledButton.icon(
+                              onPressed: () {
+                                Navigator.pop(ctx);
+                                _downloadAccount(author['sec_uid'] ?? '',
+                                    author['nickname'] ?? '');
+                              },
+                              icon: const Icon(Icons.download, size: 18),
+                              label: const Text('下载全部')),
+                        )),
+                      ],
+                    ]);
+              });
+        });
   }
 
-  // ═══ 抖音专属功能 ═══
+  void _downloadAccount(String secUid, String nickname) {
+    if (secUid.isEmpty) return;
+    _run('下载 $nickname', () async {
+      await _syncCookie();
+      final sp = await _savePath();
+      final r = await DownloadEngine.instance
+          .callInBackground('batch_download_account', {
+        'platform': 'douyin',
+        'sec_uid': secUid,
+        'nickname': nickname,
+        'save_path': sp,
+        'task_id': DownloadEngine.instance.newTaskId()
+      });
+      _snack(r['success'] == true ? '${r['message']}' : '失败: ${r['message']}',
+          error: r['success'] != true);
+    });
+  }
 
-  /// 检测链接信息（作者/合集）
-  Future<void> _detectLinkInfo() async {
-    final url = _extractLink();
-    if (url.isEmpty) {
-      _showSnackBar('请先输入链接', isError: true);
-      return;
-    }
-    await _syncCookie();
-    _setProcessing(true);
-
-    try {
-      final result = await DouyinBridge.detectLinkInfo(url);
+  void _hotList() {
+    _run('获取热榜', () async {
+      await _syncCookie();
+      final r = await DouyinBridge.getHotList();
       if (!mounted) return;
-      if (result['success'] == true) {
-        _showDetectResultDialog(result);
-      } else {
-        _showSnackBar('检测失败: ${result['message']}', isError: true);
+      final data = r['data'];
+      if (r['success'] != true || data is! List || data.isEmpty) {
+        _log.warn('热榜失败', tag: 'douyin');
+        _snack('热榜获取失败', error: true);
+        return;
       }
-    } catch (e) {
-      _showSnackBar('检测失败: $e', isError: true);
-    } finally {
-      _setProcessing(false);
-    }
+      _log.success('热榜: ${data.length} 条', tag: 'douyin');
+      _showHotList(data);
+    });
   }
 
-  void _showDetectResultDialog(Map<String, dynamic> result) {
-    final author = result['author'] as Map<String, dynamic>?;
-    final mix = result['mix'] as Map<String, dynamic>?;
-    final title = result['title']?.toString() ?? '';
+  void _showHotList(List data) {
+    final scheme = Theme.of(context).colorScheme;
+    showModalBottomSheet(
+        context: context,
+        isScrollControlled: true,
+        builder: (ctx) {
+          return DraggableScrollableSheet(
+              expand: false,
+              initialChildSize: 0.7,
+              builder: (ctx, scroll) {
+                return Column(children: [
+                  Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Row(children: [
+                        Icon(Icons.local_fire_department, color: scheme.error),
+                        const SizedBox(width: 8),
+                        Text('抖音热榜', style: Theme.of(ctx).textTheme.titleLarge),
+                      ])),
+                  const Divider(height: 1),
+                  Expanded(
+                      child: ListView.builder(
+                          controller: scroll,
+                          itemCount: data.length,
+                          itemBuilder: (ctx, i) {
+                            final item = data[i];
+                            final title = item is Map
+                                ? (item['word'] ?? '').toString()
+                                : item.toString();
+                            return ListTile(
+                              leading: Container(
+                                  width: 28,
+                                  height: 28,
+                                  alignment: Alignment.center,
+                                  decoration: BoxDecoration(
+                                      color: i < 3
+                                          ? scheme.error
+                                          : scheme.surfaceContainerHighest,
+                                      borderRadius: BorderRadius.circular(6)),
+                                  child: Text('${i + 1}',
+                                      style: TextStyle(
+                                          color: i < 3
+                                              ? scheme.onError
+                                              : scheme.onSurface,
+                                          fontWeight: i < 3
+                                              ? FontWeight.bold
+                                              : FontWeight.normal,
+                                          fontSize: 12))),
+                              title: Text(title,
+                                  maxLines: 1, overflow: TextOverflow.ellipsis),
+                            );
+                          })),
+                ]);
+              });
+        });
+  }
 
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('链接信息'),
-        content: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (title.isNotEmpty) Text('标题: $title'),
-              const SizedBox(height: 12),
-              if (author != null) ...[
-                const Text('👤 作者信息',
-                    style: TextStyle(fontWeight: FontWeight.bold)),
-                Text('昵称: ${author['nickname'] ?? ''}'),
-                Text('UID: ${author['uid'] ?? ''}'),
-                Text('抖音号: ${author['unique_id'] ?? ''}'),
-                const SizedBox(height: 8),
-                if (author['sec_uid'] != null &&
-                    (author['sec_uid'] as String).isNotEmpty)
-                  FilledButton.icon(
-                    onPressed: () {
-                      Navigator.pop(ctx);
-                      _batchDownloadAuthor(
-                          author['sec_uid'], author['nickname'] ?? '未知');
-                    },
-                    icon: const Icon(Icons.person, size: 16),
-                    label: const Text('下载该作者全部作品'),
-                  ),
+  void _search() {
+    showDialog<String>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+              title: const Text('搜索'),
+              content: TextField(
+                  autofocus: true,
+                  decoration: const InputDecoration(
+                      hintText: '关键词', prefixIcon: Icon(Icons.search)),
+                  onSubmitted: (v) => Navigator.pop(ctx, v)),
+              actions: [
+                TextButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Text('取消')),
+                FilledButton(onPressed: () {}, child: const Text('搜索')),
               ],
-              if (mix != null) ...[
-                const SizedBox(height: 12),
-                const Text('📁 合集信息',
-                    style: TextStyle(fontWeight: FontWeight.bold)),
-                Text('名称: ${mix['mix_name'] ?? ''}'),
-                Text('作品数: ${mix['count'] ?? 0}'),
-                const SizedBox(height: 8),
-                FilledButton.icon(
-                  onPressed: () {
-                    Navigator.pop(ctx);
-                    _batchDownloadMix(
-                        mix['mix_id'], mix['mix_name'] ?? '未知合集');
-                  },
-                  icon: const Icon(Icons.folder, size: 16),
-                  label: const Text('下载该合集全部作品'),
-                ),
-              ],
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('关闭'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// 批量下载作者作品
-  Future<void> _batchDownloadAuthor(String secUid, String nickname) async {
-    await _syncCookie();
-    _setProcessing(true);
-    _showSnackBar('开始下载作者作品: $nickname');
-
-    try {
-      final savePath = await _getSavePath();
-      final result = await DouyinBridge.batchDownloadAccount(
-          secUid, nickname, savePath);
-      if (!mounted) return;
-      if (result['success'] == true) {
-        _showSnackBar('✅ ${result['message']}');
-      } else {
-        _showSnackBar('下载失败: ${result['message']}', isError: true);
-      }
-    } catch (e) {
-      _showSnackBar('下载失败: $e', isError: true);
-    } finally {
-      _setProcessing(false);
-    }
-  }
-
-  /// 批量下载合集
-  Future<void> _batchDownloadMix(String mixId, String mixName) async {
-    await _syncCookie();
-    _setProcessing(true);
-    _showSnackBar('开始下载合集: $mixName');
-
-    try {
-      final savePath = await _getSavePath();
-      final result =
-          await DouyinBridge.batchDownloadMix(mixId, mixName, savePath);
-      if (!mounted) return;
-      if (result['success'] == true) {
-        _showSnackBar('✅ ${result['message']}');
-      } else {
-        _showSnackBar('下载失败: ${result['message']}', isError: true);
-      }
-    } catch (e) {
-      _showSnackBar('下载失败: $e', isError: true);
-    } finally {
-      _setProcessing(false);
-    }
-  }
-
-  /// 获取收藏夹列表
-  Future<void> _listCollectFolders() async {
-    await _syncCookie();
-    _setProcessing(true);
-
-    try {
-      final result = await DouyinBridge.listCollectFolders();
-      if (!mounted) return;
-      if (result['success'] == true) {
-        final folders = result['folders'] as List<dynamic>? ?? [];
-        _showCollectFoldersDialog(folders);
-      } else {
-        _showSnackBar('获取收藏夹失败: ${result['message']}', isError: true);
-      }
-    } catch (e) {
-      _showSnackBar('获取收藏夹失败: $e', isError: true);
-    } finally {
-      _setProcessing(false);
-    }
-  }
-
-  void _showCollectFoldersDialog(List<dynamic> folders) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('收藏夹列表'),
-        content: SizedBox(
-          width: double.maxFinite,
-          height: 400,
-          child: folders.isEmpty
-              ? const Center(child: Text('没有找到收藏夹'))
-              : ListView.builder(
-                  itemCount: folders.length,
-                  itemBuilder: (context, index) {
-                    final folder = folders[index] as Map<String, dynamic>;
-                    return ListTile(
-                      leading: const Icon(Icons.bookmark),
-                      title: Text(folder['name'] ?? '未命名'),
-                      subtitle: Text('${folder['count'] ?? 0} 个作品'),
-                      trailing: const Icon(Icons.download),
-                      onTap: () {
-                        Navigator.pop(ctx);
-                        _batchDownloadCollect(
-                          folder['id']?.toString() ?? '',
-                          folder['name'] ?? '未命名',
-                        );
-                      },
-                    );
-                  },
-                ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('关闭'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// 下载收藏夹
-  Future<void> _batchDownloadCollect(String collectId, String collectName) async {
-    await _syncCookie();
-    _setProcessing(true);
-    _showSnackBar('开始下载收藏夹: $collectName');
-
-    try {
-      final savePath = await _getSavePath();
-      final result = await DouyinBridge.batchDownloadCollect(
-          collectId, collectName, savePath);
-      if (!mounted) return;
-      if (result['success'] == true) {
-        _showSnackBar('✅ ${result['message']}');
-      } else {
-        _showSnackBar('下载失败: ${result['message']}', isError: true);
-      }
-    } catch (e) {
-      _showSnackBar('下载失败: $e', isError: true);
-    } finally {
-      _setProcessing(false);
-    }
-  }
-
-  /// 从历史记录重新下载
-  Future<void> _redownloadFromHistory() async {
-    await _syncCookie();
-    _setProcessing(true);
-    _showSnackBar('从历史记录重新下载...');
-
-    try {
-      final savePath = await _getSavePath();
-      final result = await DouyinBridge.redownloadFromHistory(savePath);
-      if (!mounted) return;
-      if (result['success'] == true) {
-        _showSnackBar('✅ ${result['message']}');
-      } else {
-        _showSnackBar('重新下载失败: ${result['message']}', isError: true);
-      }
-    } catch (e) {
-      _showSnackBar('重新下载失败: $e', isError: true);
-    } finally {
-      _setProcessing(false);
-    }
-  }
-
-  /// 录制直播
-  Future<void> _recordLive() async {
-    final url = _extractLink();
-    if (url.isEmpty) {
-      _showSnackBar('请先输入直播间链接', isError: true);
-      return;
-    }
-    await _syncCookie();
-    _setProcessing(true);
-    _showSnackBar('开始录制直播...');
-
-    try {
-      final savePath = await _getSavePath();
-      Map<String, dynamic> result;
-      switch (widget.platformId) {
-        case 'kuaishou':
-          // 快手直播录制（待实现完整功能）
-          _showSnackBar('快手直播录制功能开发中');
-          _setProcessing(false);
+            )).then((kw) {
+      if (kw == null || kw.trim().isEmpty) return;
+      _run('搜索 "$kw"', () async {
+        await _syncCookie();
+        final r = await DouyinBridge.searchGeneral(kw.trim());
+        if (!mounted) return;
+        final data = r['data'];
+        if (r['success'] != true || data is! List) {
+          _snack('搜索失败', error: true);
           return;
-        default:
-          result = await DouyinBridge.recordLive(url, savePath);
-      }
-      if (!mounted) return;
-      if (result['success'] == true) {
-        _showSnackBar('✅ ${result['message']}');
-      } else {
-        _showSnackBar('录制失败: ${result['message']}', isError: true);
-      }
-    } catch (e) {
-      _showSnackBar('录制失败: $e', isError: true);
-    } finally {
-      _setProcessing(false);
-    }
+        }
+        _snack('搜索到 ${data.length} 条');
+      });
+    });
   }
 
-  // ═══ UI 构建 ═══
-
-  /// 获取平台专属的快捷操作按钮
-  List<_QuickAction> _getQuickActions() {
-    final actions = <_QuickAction>[
-      _QuickAction(
-        icon: Icons.download_rounded,
-        label: '下载作品',
-        description: '粘贴链接直接下载',
-        onTap: _download,
-      ),
-      _QuickAction(
-        icon: Icons.content_paste_rounded,
-        label: '粘贴链接',
-        description: '从剪贴板粘贴',
-        onTap: _pasteFromClipboard,
-      ),
-      _QuickAction(
-        icon: Icons.playlist_add_rounded,
-        label: '批量下载',
-        description: '多个链接批量下载',
-        onTap: _batchDownload,
-      ),
-      _QuickAction(
-        icon: Icons.person_search_rounded,
-        label: '检测信息',
-        description: '解析作者/合集信息',
-        onTap: _detectLinkInfo,
-      ),
-    ];
-
-    // 抖音专属功能
-    if (widget.platformId == 'douyin') {
-      actions.addAll([
-        _QuickAction(
-          icon: Icons.person_rounded,
-          label: '作者作品',
-          description: '下载作者全部作品',
-          onTap: _detectLinkInfo, // 先检测再下载
-        ),
-        _QuickAction(
-          icon: Icons.bookmark_rounded,
-          label: '收藏夹',
-          description: '浏览并下载收藏夹',
-          onTap: _listCollectFolders,
-        ),
-        _QuickAction(
-          icon: Icons.live_tv_rounded,
-          label: '直播录制',
-          description: '录制抖音直播',
-          onTap: _recordLive,
-        ),
-        _QuickAction(
-          icon: Icons.history_rounded,
-          label: '重新下载',
-          description: '从历史记录重新下载',
-          onTap: _redownloadFromHistory,
-        ),
-      ]);
-    }
-
-    // 小红书专属功能
-    if (widget.platformId == 'xhs') {
-      actions.addAll([
-        _QuickAction(
-          icon: Icons.person_rounded,
-          label: '作者作品',
-          description: '下载作者全部笔记',
-          onTap: () => _showSnackBar('请粘贴作者主页链接后使用批量下载'),
-        ),
-      ]);
-    }
-
-    // 快手专属功能
-    if (widget.platformId == 'kuaishou') {
-      actions.addAll([
-        _QuickAction(
-          icon: Icons.live_tv_rounded,
-          label: '直播录制',
-          description: '录制快手直播',
-          onTap: _recordLive,
-        ),
-      ]);
-    }
-
-    return actions;
+  void _simpleRun(String fn, String label) {
+    final url = _firstLink;
+    if (url.isEmpty) return _snack('请先输入链接', error: true);
+    _run(label, () async {
+      await _syncCookie();
+      final sp = await _savePath();
+      final r = await DownloadEngine.instance.callInBackground(fn, {
+        'platform': _platform,
+        'link': url,
+        'save_path': sp,
+        'task_id': DownloadEngine.instance.newTaskId()
+      });
+      _snack(
+          r['success'] == true
+              ? '$label: ${r['message']}'
+              : '$label失败: ${r['message']}',
+          error: r['success'] != true);
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final actions = _getQuickActions();
-
-    return Stack(
-      children: [
-        SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // 链接输入区域
+    return Scaffold(
+      body: CustomScrollView(slivers: [
+        SliverAppBar.medium(title: const Text('FNB Download'), actions: [
+          IconButton(
+            icon: Badge(
+                isLabelVisible: _log.length > 0,
+                label: Text('${_log.length}',
+                    style: const TextStyle(fontSize: 10)),
+                child: const Icon(Icons.terminal)),
+            onPressed: () => setState(() => _showLog = !_showLog),
+            tooltip: '日志',
+          ),
+          Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: SegmentedButton<String>(
+                segments: const [
+                  ButtonSegment(
+                      value: 'douyin',
+                      label: Text('抖音'),
+                      icon: Icon(Icons.video_library, size: 16)),
+                  ButtonSegment(
+                      value: 'xhs',
+                      label: Text('小红书'),
+                      icon: Icon(Icons.book, size: 16)),
+                ],
+                selected: {_platform},
+                onSelectionChanged: (s) => setState(() => _platform = s.first),
+                style: ButtonStyle(visualDensity: VisualDensity.compact),
+                showSelectedIcon: false,
+              )),
+        ]),
+        SliverPadding(
+            padding: const EdgeInsets.all(16),
+            sliver: SliverList(
+                delegate: SliverChildListDelegate([
+              // 输入卡片
               Card(
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      TextField(
-                        controller: _linkController,
-                        maxLines: 3,
-                        minLines: 2,
-                        decoration: InputDecoration(
-                          hintText:
-                              '粘贴${widget.platformName}链接\n支持多个链接（每行一个）',
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          suffixIcon: _linkController.text.isNotEmpty
-                              ? IconButton(
-                                  icon: const Icon(Icons.clear),
-                                  onPressed: () =>
-                                      setState(() => _linkController.clear()),
-                                )
-                              : null,
-                        ),
-                        onChanged: (_) => setState(() {}),
-                      ),
-                      const SizedBox(height: 12),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: SizedBox(
-                              height: 44,
-                              child: OutlinedButton.icon(
-                                onPressed: _pasteFromClipboard,
-                                icon:
-                                    const Icon(Icons.content_paste, size: 18),
-                                label: const Text('粘贴链接'),
+                  child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            TextField(
+                              controller: _link,
+                              enabled: !_busy,
+                              minLines: 2,
+                              maxLines: 4,
+                              decoration: InputDecoration(
+                                hintText:
+                                    '粘贴${_platform == 'douyin' ? "抖音" : "小红书"}链接...',
+                                suffixIcon: _link.text.isNotEmpty
+                                    ? IconButton(
+                                        icon: const Icon(Icons.clear, size: 20),
+                                        onPressed: () =>
+                                            setState(() => _link.clear()))
+                                    : null,
                               ),
+                              onChanged: (_) => setState(() {}),
                             ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: SizedBox(
-                              height: 44,
-                              child: FilledButton.icon(
-                                onPressed: _download,
-                                icon: const Icon(Icons.download, size: 18),
-                                label: const Text('下载'),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-
-              // 快捷操作区域
-              Text(
-                '快捷操作',
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      color: scheme.onSurfaceVariant,
-                    ),
-              ),
-              const SizedBox(height: 8),
-              GridView.builder(
+                            const SizedBox(height: 12),
+                            Row(children: [
+                              OutlinedButton.icon(
+                                  onPressed: _busy
+                                      ? null
+                                      : () async {
+                                          final d = await Clipboard.getData(
+                                              Clipboard.kTextPlain);
+                                          if (d?.text != null &&
+                                              d!.text!.isNotEmpty) {
+                                            setState(
+                                                () => _link.text = d.text!);
+                                          }
+                                        },
+                                  icon: const Icon(Icons.paste, size: 18),
+                                  label: const Text('粘贴')),
+                              const SizedBox(width: 8),
+                              OutlinedButton.icon(
+                                  onPressed: _busy ? null : _detect,
+                                  icon:
+                                      const Icon(Icons.info_outline, size: 18),
+                                  label: const Text('解析')),
+                              const Spacer(),
+                              FilledButton.icon(
+                                  onPressed: _busy ? null : _download,
+                                  icon: _busy
+                                      ? const SizedBox(
+                                          width: 18,
+                                          height: 18,
+                                          child: CircularProgressIndicator(
+                                              strokeWidth: 2))
+                                      : const Icon(Icons.download),
+                                  label: Text(_busy ? '处理中' : '下载')),
+                            ]),
+                          ]))),
+              const SizedBox(height: 24),
+              // 功能网格
+              Text('快速操作',
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleSmall
+                      ?.copyWith(color: scheme.onSurfaceVariant)),
+              const SizedBox(height: 12),
+              GridView.count(
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
-                gridDelegate:
-                    const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 2,
-                  childAspectRatio: 2.5,
-                  crossAxisSpacing: 8,
-                  mainAxisSpacing: 8,
-                ),
-                itemCount: actions.length,
-                itemBuilder: (context, index) {
-                  final action = actions[index];
-                  return _QuickActionButton(action: action);
-                },
+                crossAxisCount: MediaQuery.of(context).size.width > 600 ? 3 : 2,
+                mainAxisSpacing: 12,
+                crossAxisSpacing: 12,
+                childAspectRatio: 2.5,
+                children: [
+                  if (_platform == 'douyin') ...[
+                    _ActionTile(
+                        icon: Icons.search,
+                        label: '搜索',
+                        color: scheme.primary,
+                        onTap: _busy ? null : _search),
+                    _ActionTile(
+                        icon: Icons.local_fire_department,
+                        label: '热榜',
+                        color: scheme.error,
+                        onTap: _busy ? null : _hotList),
+                  ],
+                  _ActionTile(
+                      icon: Icons.comment,
+                      label: '评论',
+                      color: scheme.tertiary,
+                      onTap: _busy
+                          ? null
+                          : () => _simpleRun('scrape_comments', '评论')),
+                  _ActionTile(
+                      icon: Icons.music_note,
+                      label: '音频',
+                      color: scheme.primary,
+                      onTap: _busy
+                          ? null
+                          : () => _simpleRun('extract_audio', '音频')),
+                  _ActionTile(
+                      icon: Icons.image,
+                      label: '封面',
+                      color: scheme.secondary,
+                      onTap: _busy
+                          ? null
+                          : () => _simpleRun('download_cover', '封面')),
+                ],
               ),
-              const SizedBox(height: 16),
-
-              // 提示信息
-              Center(
-                child: Text(
-                  '下载后请在"任务"页查看进度',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: scheme.onSurfaceVariant,
-                      ),
-                ),
-              ),
-            ],
-          ),
-        ),
-
-        // 加载遮罩
-        if (_isProcessing)
-          Container(
-            color: Colors.black.withValues(alpha: 0.3),
-            child: const Center(
-              child: Card(
-                child: Padding(
-                  padding: EdgeInsets.all(24),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      CircularProgressIndicator(),
-                      SizedBox(height: 16),
-                      Text('处理中，请稍候...'),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-      ],
+              // 日志面板
+              if (_showLog) ...[
+                const SizedBox(height: 24),
+                _LogPanel(log: _log, scheme: scheme),
+              ],
+              const SizedBox(height: 32),
+            ]))),
+      ]),
     );
   }
 }
 
-/// 快捷操作数据
-class _QuickAction {
+class _ActionTile extends StatelessWidget {
   final IconData icon;
   final String label;
-  final String description;
-  final VoidCallback onTap;
-
-  const _QuickAction({
-    required this.icon,
-    required this.label,
-    required this.description,
-    required this.onTap,
-  });
-}
-
-/// 快捷操作按钮
-class _QuickActionButton extends StatelessWidget {
-  final _QuickAction action;
-
-  const _QuickActionButton({required this.action});
+  final Color color;
+  final VoidCallback? onTap;
+  const _ActionTile(
+      {required this.icon,
+      required this.label,
+      required this.color,
+      this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-
     return Card(
-      elevation: 0,
+      color: color.withValues(alpha: 0.08),
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(
-          color: scheme.outlineVariant.withValues(alpha: 0.5),
-        ),
-      ),
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(color: color.withValues(alpha: 0.15))),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
-        onTap: action.onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          child: Row(
-            children: [
-              Icon(action.icon, size: 20, color: scheme.primary),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      action.label,
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            fontWeight: FontWeight.w500,
-                          ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    Text(
-                      action.description,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: scheme.onSurfaceVariant,
-                            fontSize: 10,
-                          ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Row(children: [
+              Icon(icon, color: color, size: 24),
+              const SizedBox(width: 12),
+              Text(label,
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleSmall
+                      ?.copyWith(fontWeight: FontWeight.w600)),
+            ]),
+          )),
     );
+  }
+}
+
+class _LogPanel extends StatelessWidget {
+  final LogService log;
+  final ColorScheme scheme;
+  const _LogPanel({required this.log, required this.scheme});
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<int>(
+        valueListenable: log.notifier,
+        builder: (context, _, __) {
+          final entries = log.entries.reversed.take(20).toList();
+          return Card(
+            color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
+            child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
+                      child: Row(children: [
+                        Icon(Icons.terminal, size: 18, color: scheme.primary),
+                        const SizedBox(width: 8),
+                        Text('操作日志',
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleSmall
+                                ?.copyWith(fontWeight: FontWeight.w600)),
+                        const Spacer(),
+                        IconButton(
+                            icon: const Icon(Icons.delete_sweep, size: 18),
+                            onPressed: log.clear,
+                            visualDensity: VisualDensity.compact),
+                      ])),
+                  const Divider(height: 1),
+                  if (entries.isEmpty)
+                    const Padding(
+                        padding: EdgeInsets.all(24),
+                        child: Center(child: Text('暂无记录')))
+                  else
+                    ConstrainedBox(
+                        constraints: const BoxConstraints(maxHeight: 250),
+                        child: ListView.builder(
+                          shrinkWrap: true,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 8),
+                          itemCount: entries.length,
+                          itemBuilder: (ctx, i) {
+                            final e = entries[i];
+                            return Padding(
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 1),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                        '${e.timestamp.hour.toString().padLeft(2, '0')}:${e.timestamp.minute.toString().padLeft(2, '0')}:${e.timestamp.second.toString().padLeft(2, '0')}',
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .labelSmall
+                                            ?.copyWith(
+                                                color: scheme.outline,
+                                                fontFamily: 'monospace')),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                        child: Text(e.message,
+                                            style: Theme.of(context)
+                                                .textTheme
+                                                .bodySmall)),
+                                  ],
+                                ));
+                          },
+                        )),
+                ]),
+          );
+        });
   }
 }

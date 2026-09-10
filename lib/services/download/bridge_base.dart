@@ -13,6 +13,9 @@ abstract class BridgeBase {
   /// 当前正在执行的任务ID（供下载过程中更新状态用）
   static String? _activeTaskId;
 
+  /// 当前任务ID只读访问（Bridge 调用引擎时作为 progress key 传入）
+  static String? get currentTaskId => _activeTaskId;
+
   /// 每个任务的起始时间戳（用于按时间过滤目录文件）
   static final Map<String, int> _taskStartTimes = {};
 

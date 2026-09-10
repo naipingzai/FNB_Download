@@ -1,10 +1,10 @@
 import 'bridge_base.dart';
-import '../python/python_runner.dart';
+import 'download_engine.dart';
 
-/// 抖音下载桥接层（通过内嵌 Python 脚本执行）
-/// 暴露 dy_bridge.py 的所有功能
+/// 抖音下载桥接层（Linux: FFI→CPython / Android: Chaquopy）
+/// 全部功能经 DownloadEngine → fnb_bridge 统一 JSON 协议分发。
 class DouyinBridge {
-  static final PythonRunner _python = PythonRunner.instance;
+  static final DownloadEngine _engine = DownloadEngine.instance;
 
   /// 解析链接并下载单个作品
   static Future<Map<String, dynamic>> parseAndDownload(
@@ -15,19 +15,20 @@ class DouyinBridge {
       source: 'douyin',
       type: 'video',
       execute: (updateStatus, updateProgress) async {
-        updateStatus('🐍 调用 Python 解析抖音链接...');
+        updateStatus('🔍 调用引擎解析抖音链接...');
         try {
-          final result = await _python.callPythonJson(
-            module: 'dy_bridge',
-            function: 'parse_link',
-            args: [link, savePath, ''],
-          );
+          final result = await _engine.callInBackground('parse_and_download', {
+            'platform': 'douyin',
+            'link': link,
+            'save_path': savePath,
+            'task_id': BridgeBase.currentTaskId ?? '',
+          });
           if (result['success'] == true) {
             updateStatus('✅ ${result['title'] ?? '下载完成'}');
           }
           return result;
         } catch (e) {
-          return {'success': false, 'message': 'Python 调用失败: $e'};
+          return {'success': false, 'message': '调用失败: $e'};
         }
       },
     );
@@ -36,12 +37,10 @@ class DouyinBridge {
   /// 检测链接信息（提取作者/合集信息）
   static Future<Map<String, dynamic>> detectLinkInfo(String link) async {
     try {
-      final result = await _python.callPythonJson(
-        module: 'dy_bridge',
-        function: 'detect_link_info',
-        args: [link],
-      );
-      return result;
+      return await _engine.call('detect_link_info', {
+        'platform': 'douyin',
+        'link': link,
+      });
     } catch (e) {
       return {'success': false, 'message': '检测失败: $e'};
     }
@@ -56,13 +55,16 @@ class DouyinBridge {
       source: 'douyin',
       type: 'video',
       execute: (updateStatus, updateProgress) async {
-        updateStatus('🐍 批量下载作者作品: $nickname');
+        updateStatus('📥 批量下载作者作品: $nickname');
         try {
-          final result = await _python.callPythonJson(
-            module: 'dy_bridge',
-            function: 'batch_download_account',
-            args: [secUid, nickname, savePath, ''],
-          );
+          final result =
+              await _engine.callInBackground('batch_download_account', {
+            'platform': 'douyin',
+            'sec_uid': secUid,
+            'nickname': nickname,
+            'save_path': savePath,
+            'task_id': BridgeBase.currentTaskId ?? '',
+          });
           if (result['success'] == true) {
             updateStatus('✅ ${result['title']} - ${result['message']}');
           }
@@ -77,12 +79,10 @@ class DouyinBridge {
   /// 列出作者作品列表（不下载）
   static Future<Map<String, dynamic>> listAccountWorks(String secUid) async {
     try {
-      final result = await _python.callPythonJson(
-        module: 'dy_bridge',
-        function: 'list_account_works',
-        args: [secUid],
-      );
-      return result;
+      return await _engine.call('list_account_works', {
+        'platform': 'douyin',
+        'sec_uid': secUid,
+      });
     } catch (e) {
       return {'success': false, 'message': '获取作品列表失败: $e'};
     }
@@ -91,12 +91,7 @@ class DouyinBridge {
   /// 获取收藏夹列表
   static Future<Map<String, dynamic>> listCollectFolders() async {
     try {
-      final result = await _python.callPythonJson(
-        module: 'dy_bridge',
-        function: 'list_collect_folders',
-        args: [],
-      );
-      return result;
+      return await _engine.call('list_collect_folders', {'platform': 'douyin'});
     } catch (e) {
       return {'success': false, 'message': '获取收藏夹失败: $e'};
     }
@@ -111,13 +106,16 @@ class DouyinBridge {
       source: 'douyin',
       type: 'video',
       execute: (updateStatus, updateProgress) async {
-        updateStatus('🐍 下载收藏夹: $collectName');
+        updateStatus('📥 下载收藏夹: $collectName');
         try {
-          final result = await _python.callPythonJson(
-            module: 'dy_bridge',
-            function: 'batch_download_collect',
-            args: [collectId, collectName, savePath, ''],
-          );
+          final result =
+              await _engine.callInBackground('batch_download_collect', {
+            'platform': 'douyin',
+            'collect_id': collectId,
+            'collect_name': collectName,
+            'save_path': savePath,
+            'task_id': BridgeBase.currentTaskId ?? '',
+          });
           if (result['success'] == true) {
             updateStatus('✅ ${result['message']}');
           }
@@ -138,13 +136,15 @@ class DouyinBridge {
       source: 'douyin',
       type: 'video',
       execute: (updateStatus, updateProgress) async {
-        updateStatus('🐍 下载合集: $mixName');
+        updateStatus('📥 下载合集: $mixName');
         try {
-          final result = await _python.callPythonJson(
-            module: 'dy_bridge',
-            function: 'batch_download_mix',
-            args: [mixId, mixName, savePath, ''],
-          );
+          final result = await _engine.callInBackground('batch_download_mix', {
+            'platform': 'douyin',
+            'mix_id': mixId,
+            'mix_name': mixName,
+            'save_path': savePath,
+            'task_id': BridgeBase.currentTaskId ?? '',
+          });
           if (result['success'] == true) {
             updateStatus('✅ ${result['message']}');
           }
@@ -165,13 +165,14 @@ class DouyinBridge {
       source: 'douyin',
       type: 'video',
       execute: (updateStatus, updateProgress) async {
-        updateStatus('🐍 从历史记录重新下载...');
+        updateStatus('🔄 从历史记录重新下载...');
         try {
-          final result = await _python.callPythonJson(
-            module: 'dy_bridge',
-            function: 'redownload_from_history',
-            args: [savePath, ''],
-          );
+          final result =
+              await _engine.callInBackground('redownload_from_history', {
+            'platform': 'douyin',
+            'save_path': savePath,
+            'task_id': BridgeBase.currentTaskId ?? '',
+          });
           if (result['success'] == true) {
             updateStatus('✅ ${result['message']}');
           }
@@ -192,13 +193,14 @@ class DouyinBridge {
       source: 'douyin',
       type: 'live',
       execute: (updateStatus, updateProgress) async {
-        updateStatus('🐍 开始录制直播...');
+        updateStatus('🎥 开始录制直播...');
         try {
-          final result = await _python.callPythonJson(
-            module: 'dy_bridge',
-            function: 'record_live',
-            args: [liveUrl, savePath, ''],
-          );
+          final result = await _engine.callInBackground('record_live', {
+            'platform': 'douyin',
+            'live_url': liveUrl,
+            'save_path': savePath,
+            'task_id': BridgeBase.currentTaskId ?? '',
+          });
           if (result['success'] == true) {
             updateStatus('✅ ${result['message']}');
           }
@@ -210,41 +212,139 @@ class DouyinBridge {
     );
   }
 
-  /// 获取 Python 配置
-  static Future<Map<String, dynamic>> getConfig() async {
+  /// 采集评论
+  static Future<Map<String, dynamic>> scrapeComments(
+      String link, String savePath) async {
+    return BridgeBase.executeTask(
+      link: 'comments:$link',
+      savePath: savePath,
+      source: 'douyin',
+      type: 'video',
+      execute: (updateStatus, updateProgress) async {
+        updateStatus('💬 开始采集评论...');
+        try {
+          final result = await _engine.callInBackground('scrape_comments', {
+            'link': link,
+            'save_path': savePath,
+            'task_id': BridgeBase.currentTaskId ?? '',
+          });
+          if (result['success'] == true) {
+            updateStatus('✅ ${result['message']}');
+          }
+          return result;
+        } catch (e) {
+          return {'success': false, 'message': '评论采集失败: $e'};
+        }
+      },
+    );
+  }
+
+  /// 下载封面
+  static Future<Map<String, dynamic>> downloadCover(
+      String link, String savePath) async {
+    return BridgeBase.executeTask(
+      link: 'cover:$link',
+      savePath: savePath,
+      source: 'douyin',
+      type: 'video',
+      execute: (updateStatus, updateProgress) async {
+        updateStatus('🖼️ 下载封面...');
+        try {
+          final result = await _engine.callInBackground('download_cover', {
+            'platform': 'douyin',
+            'link': link,
+            'save_path': savePath,
+            'task_id': BridgeBase.currentTaskId ?? '',
+          });
+          if (result['success'] == true) {
+            updateStatus('✅ ${result['message']}');
+          }
+          return result;
+        } catch (e) {
+          return {'success': false, 'message': '封面下载失败: $e'};
+        }
+      },
+    );
+  }
+
+  /// 提取音频
+  static Future<Map<String, dynamic>> extractAudio(
+      String link, String savePath) async {
+    return BridgeBase.executeTask(
+      link: 'audio:$link',
+      savePath: savePath,
+      source: 'douyin',
+      type: 'video',
+      execute: (updateStatus, updateProgress) async {
+        updateStatus('🎵 提取音频...');
+        try {
+          final result = await _engine.callInBackground('extract_audio', {
+            'platform': 'douyin',
+            'link': link,
+            'save_path': savePath,
+            'task_id': BridgeBase.currentTaskId ?? '',
+          });
+          if (result['success'] == true) {
+            updateStatus('✅ ${result['message']}');
+          }
+          return result;
+        } catch (e) {
+          return {'success': false, 'message': '音频提取失败: $e'};
+        }
+      },
+    );
+  }
+
+  /// 获取数据统计
+  static Future<Map<String, dynamic>> getDataStats(String link) async {
     try {
-      final result = await _python.callPythonJson(
-        module: 'dy_bridge',
-        function: 'get_config',
-        args: [],
-      );
-      return result;
+      return await _engine.call('get_data_stats', {
+        'platform': 'douyin',
+        'link': link,
+      });
     } catch (e) {
-      return {'success': false, 'message': '获取配置失败: $e'};
+      return {'success': false, 'message': '获取数据失败: $e'};
     }
   }
 
-  /// 更新 Python 配置
-  static Future<Map<String, dynamic>> updateConfig(String configJson) async {
+  /// 获取热榜数据
+  static Future<Map<String, dynamic>> getHotList() async {
     try {
-      final result = await _python.callPythonJson(
-        module: 'dy_bridge',
-        function: 'update_config',
-        args: [configJson],
-      );
-      return result;
+      return await _engine.call('get_hot_list', {});
     } catch (e) {
-      return {'success': false, 'message': '更新配置失败: $e'};
+      return {'success': false, 'message': '获取热榜失败: $e'};
     }
   }
 
   /// 设置 Cookie
   static Future<void> setCookie(String cookie) async {
-    await _python.setDouyinCookie(cookie);
+    await _engine
+        .call('set_cookie', {'platform': 'douyin', 'cookie': cookie});
   }
 
   /// 设置代理
   static Future<void> setProxy(String proxy) async {
-    await _python.setDouyinProxy(proxy);
+    await _engine.call('set_proxy', {'platform': 'douyin', 'proxy': proxy});
   }
+  /// 综合搜索（原生 tkd Search 接口：视频/用户/直播混合结果）
+  static Future<Map<String, dynamic>> searchGeneral(String keyword) async {
+    try {
+      return await _engine.callInBackground('search_general', {
+        'platform': 'douyin',
+        'keyword': keyword,
+      });
+    } catch (e) {
+      return {'success': false, 'message': '搜索失败: $e'};
+    }
+  }
+
+  /// 获取引擎后端状态（native=完整版 / legacy=精简版）
+  static Future<Map<String, dynamic>> getBackendStatus() async {
+    try {
+      return await _engine.call('status', {});
+    } catch (e) {
+      return {'success': false, 'message': '$e'};
+    }
+  }
+
 }

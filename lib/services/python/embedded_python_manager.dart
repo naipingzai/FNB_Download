@@ -232,7 +232,7 @@ class EmbeddedPythonManager {
     try {
       // 1. 优先查找 python_runtime 目录中已打包的脚本
       if (_pythonHome != null) {
-        final bundledScript = File('$_pythonHome/dy_bridge.py');
+        final bundledScript = File('$_pythonHome/fnb_bridge.py');
         if (await bundledScript.exists()) {
           _scriptsDir = _pythonHome;
           debugPrint('[EmbeddedPython] Using bundled scripts at: $_scriptsDir');
@@ -240,7 +240,7 @@ class EmbeddedPythonManager {
         }
         // python_runtime/linux/ 的上级目录
         final parentDir = Directory(_pythonHome!).parent.path;
-        final parentScript = File('$parentDir/dy_bridge.py');
+        final parentScript = File('$parentDir/fnb_bridge.py');
         if (await parentScript.exists()) {
           _scriptsDir = parentDir;
           debugPrint('[EmbeddedPython] Using bundled scripts at: $_scriptsDir');

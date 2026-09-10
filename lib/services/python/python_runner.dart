@@ -81,22 +81,22 @@ class PythonRunner {
 
   /// 设置 Cookie（抖音）
   Future<void> setDouyinCookie(String cookie) async {
-    await callPython(module: 'dy_bridge', function: 'set_cookie', args: [cookie]);
+    await callPython(module: 'fnb_bridge', function: 'call', args: ['set_cookie', '{"platform": "douyin", "cookie": "\$cookie"}']);
   }
 
   /// 设置 Cookie（小红书）
   Future<void> setXhsCookie(String cookie) async {
-    await callPython(module: 'xhs_bridge', function: 'set_cookie', args: [cookie]);
+    await callPython(module: 'fnb_bridge', function: 'call', args: ['set_cookie', '{"platform": "xhs", "cookie": "\$cookie"}']);
   }
 
   /// 设置 Cookie（快手）
   Future<void> setKuaishouCookie(String cookie) async {
-    await callPython(module: 'ks_bridge', function: 'set_cookie', args: [cookie]);
+    await callPython(module: 'fnb_bridge', function: 'call', args: ['set_cookie', '{"platform": "kuaishou", "cookie": "\$cookie"}']);
   }
 
   /// 设置代理（抖音）
   Future<void> setDouyinProxy(String proxy) async {
-    await callPython(module: 'dy_bridge', function: 'set_proxy', args: [proxy]);
+    await callPython(module: 'fnb_bridge', function: 'call', args: ['set_proxy', '{"platform": "douyin", "proxy": "\$proxy"}']);
   }
 
   /// 设置代理（小红书）

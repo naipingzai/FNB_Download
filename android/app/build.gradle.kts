@@ -29,9 +29,20 @@ android {
         python {
             version = "3.12"
             pip {
-                install("httpx")
+                // 原生引擎依赖（纯 Python / C 扩展兼容 Chaquopy）
+                install("httpx[http2]")
                 install("pyyaml")
                 install("gmssl")
+                install("lxml")
+                install("aiofiles")
+                install("aiosqlite")
+                install("emoji")
+                install("openpyxl")
+                install("rich")
+                install("fastapi")
+                install("uvicorn")
+                install("websockets")
+                // pydantic 和 curl_cffi 由 compat shim 提供，无需 pip 安装
             }
         }
         ndk {
