@@ -3,8 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import '../../services/download/download_engine.dart';
-import '../../services/download/douyin_bridge.dart';
-import '../../services/download/xhs_bridge.dart';
 import '../../services/log_service.dart';
 import '../../services/storage/cookie_store.dart';
 
@@ -14,6 +12,31 @@ class HomePage extends StatefulWidget {
   @override
   State<HomePage> createState() => _HomePageState();
 }
+
+/// 功能入口定义
+class _FeatureEntry {
+  final String engineFn;
+  final String label;
+  final IconData icon;
+  const _FeatureEntry(this.engineFn, this.label, this.icon);
+}
+
+/// 抖音专属功能
+const _douyinFeatures = [
+  _FeatureEntry('get_hot_list', '热榜', Icons.whatshot_rounded),
+  _FeatureEntry('search_general', '搜索', Icons.search_rounded),
+  _FeatureEntry('batch_download_account', '批量下载作者', Icons.group_add_rounded),
+  _FeatureEntry('batch_download_mix', '批量下载合集', Icons.collections_bookmark_rounded),
+  _FeatureEntry('scrape_comments', '评论采集', Icons.comment_rounded),
+];
+
+/// 小红书专属功能
+const _xhsFeatures = [
+  _FeatureEntry('extract_data', '提取数据', Icons.analytics_rounded),
+  _FeatureEntry('batch_download_account', '批量下载用户', Icons.group_add_rounded),
+  _FeatureEntry('batch_download_mix', '批量下载合集', Icons.collections_bookmark_rounded),
+  _FeatureEntry('scrape_comments', '评论采集', Icons.comment_rounded),
+];
 
 class _HomePageState extends State<HomePage> {
   final _urlCtrl = TextEditingController();
@@ -38,9 +61,8 @@ class _HomePageState extends State<HomePage> {
     await s.load();
     final c = s.getActiveCookie();
     if (c != null && c.isNotEmpty) {
-      _platform == 'xhs'
-          ? await XhsBridge.setCookie(c)
-          : await DouyinBridge.setCookie(c);
+      await DownloadEngine.instance
+          .call('set_cookie', {'platform': _platform, 'cookie': c});
     }
   }
 
@@ -108,22 +130,22 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
-  void _onHotList() {
-    _do('热榜', () async {
-      await _syncCookie();
-      return DouyinBridge.getHotList();
-    });
-  }
 
-  void _simpleCall(String fn, String label) {
+
+  // ──────────────────── UI ────────────────────
+
+  List<_FeatureEntry> get _features =>
+      _platform == 'douyin' ? _douyinFeatures : _xhsFeatures;
+
+  void _onFeatureTap(String engineFn) {
     final url = _firstUrl;
     if (url.isEmpty) {
-      _toast('请输入链接', err: true);
+      _toast('请先输入链接', err: true);
       return;
     }
-    _do(label, () async {
+    _do(engineFn, () async {
       await _syncCookie();
-      return DownloadEngine.instance.callInBackground(fn, {
+      return DownloadEngine.instance.callInBackground(engineFn, {
         'platform': _platform,
         'link': url,
         'save_path': await _outDir(),
@@ -132,15 +154,13 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
-  // ──────────────────── UI ────────────────────
-
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
     return CustomScrollView(
       slivers: [
-        // ── AppBar ──
-        SliverAppBar.large(
+        // ── AppBar（不用 large，避免折叠截断） ──
+        SliverAppBar(
+          floating: true,
           title: const Text('FNB Download'),
           actions: [
             Badge(
@@ -170,7 +190,7 @@ class _HomePageState extends State<HomePage> {
                 platform: _platform,
                 onChanged: (p) => setState(() => _platform = p),
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 16),
 
               // URL 输入区
               _UrlInputCard(
@@ -187,7 +207,7 @@ class _HomePageState extends State<HomePage> {
                 onClear: () => setState(() => _urlCtrl.clear()),
                 onSubmitted: _onDownload,
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 16),
 
               // 操作按钮
               _ActionButtons(
@@ -195,83 +215,30 @@ class _HomePageState extends State<HomePage> {
                 onDownload: _onDownload,
                 onParse: _onParse,
               ),
-              const SizedBox(height: 28),
 
-              // 更多功能标题
-              Row(
-                children: [
-                  Text(
-                    '更多功能',
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Divider(color: cs.outlineVariant),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-            ],
-          ),
-        ),
+              const SizedBox(height: 20),
 
-        // ── 功能网格 ──
-        SliverPadding(
-          padding: const EdgeInsets.symmetric(horizontal: 20),
-          sliver: SliverGrid.count(
-            crossAxisCount: 3,
-            mainAxisSpacing: 12,
-            crossAxisSpacing: 12,
-            childAspectRatio: 1.0,
-            children: [
-              _FeatureTile(
-                icon: Icons.local_fire_department_rounded,
-                label: '热榜',
-                gradient: [cs.error, cs.errorContainer],
-                onTap: _busy ? null : _onHotList,
+              // ── 功能入口（按平台动态切换） ──
+              Text(
+                _platform == 'douyin' ? '抖音工具' : '小红书工具',
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
               ),
-              _FeatureTile(
-                icon: Icons.bookmark_rounded,
-                label: '收藏夹',
-                gradient: [cs.primary, cs.primaryContainer],
-                onTap: _busy
-                    ? null
-                    : () => _simpleCall('list_collect_folders', '收藏夹'),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: _features.map((f) {
+                  return ActionChip(
+                    avatar: Icon(f.icon, size: 18),
+                    label: Text(f.label),
+                    onPressed: _busy ? null : () => _onFeatureTap(f.engineFn),
+                  );
+                }).toList(),
               ),
-              _FeatureTile(
-                icon: Icons.search_rounded,
-                label: '搜索',
-                gradient: [cs.secondary, cs.secondaryContainer],
-                onTap: _busy
-                    ? null
-                    : () => _do('搜索', () async {
-                          await _syncCookie();
-                          return DouyinBridge.searchGeneral(_firstUrl);
-                        }),
-              ),
-              _FeatureTile(
-                icon: Icons.download_done_rounded,
-                label: '批量下载',
-                gradient: [cs.tertiary, cs.tertiaryContainer],
-                onTap:
-                    _busy ? null : () => _simpleCall('batch_download_account', '批量'),
-              ),
-              _FeatureTile(
-                icon: Icons.bar_chart_rounded,
-                label: '数据统计',
-                gradient: [cs.primary, cs.primaryContainer],
-                onTap:
-                    _busy ? null : () => _simpleCall('get_data_stats', '统计'),
-              ),
-              _FeatureTile(
-                icon: Icons.photo_library_rounded,
-                label: '封面下载',
-                gradient: [cs.secondary, cs.secondaryContainer],
-                onTap:
-                    _busy ? null : () => _simpleCall('download_cover', '封面'),
-              ),
+
+              const SizedBox(height: 20),
             ],
           ),
         ),
@@ -279,7 +246,7 @@ class _HomePageState extends State<HomePage> {
         // ── 日志面板 ──
         if (_logExpanded)
           SliverPadding(
-            padding: const EdgeInsets.fromLTRB(20, 24, 20, 8),
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
             sliver: SliverToBoxAdapter(child: _LogPanel(log: _log)),
           ),
 
@@ -526,78 +493,6 @@ class _ActionButtons extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-/// 功能网格卡片 — 微渐变图标背景
-class _FeatureTile extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final List<Color> gradient;
-  final VoidCallback? onTap;
-
-  const _FeatureTile({
-    required this.icon,
-    required this.label,
-    required this.gradient,
-    this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final enabled = onTap != null;
-    return Card(
-      elevation: 0,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      color: cs.surfaceContainerLow,
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [
-                      enabled
-                          ? gradient[0].withValues(alpha: 0.15)
-                          : cs.surfaceContainerHighest,
-                      enabled
-                          ? gradient[1].withValues(alpha: 0.25)
-                          : cs.surfaceContainerHighest,
-                    ],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(
-                  icon,
-                  size: 22,
-                  color: enabled ? gradient[0] : cs.outline,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                label,
-                style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                      color: enabled ? cs.onSurface : cs.outline,
-                      fontWeight: FontWeight.w500,
-                    ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ],
-          ),
-        ),
-      ),
     );
   }
 }
